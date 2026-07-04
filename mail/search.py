@@ -36,8 +36,12 @@ def apply_filters(qs: QuerySet, params) -> QuerySet:
             qs = qs.filter(**{flag: val.lower() in TRUE})
     if params.get("from"):
         qs = qs.filter(from_email__icontains=params["from"])
+    # A specific mailbox (e.g. "sent") shows only that; otherwise the default
+    # view is received mail — the "sent" copies are excluded.
     if params.get("mailbox"):
         qs = qs.filter(mailbox=params["mailbox"])
+    elif (params.get("include_sent") or "").lower() not in TRUE:
+        qs = qs.exclude(mailbox="sent")
     if params.get("list_id"):
         qs = qs.filter(list_id__icontains=params["list_id"])
     if params.get("label"):
