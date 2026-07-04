@@ -88,6 +88,17 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 50,
 }
 
+# --- Outbound SMTP (compose/send) ---------------------------------------
+# When SMTP_HOST is set, sent messages are relayed; either way a copy is
+# stored in the owner's "sent" mailbox (delivery status in metadata).
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_TLS = _env_bool("SMTP_TLS", True)
+SMTP_SSL = _env_bool("SMTP_SSL", False)
+SMTP_DEFAULT_FROM = os.getenv("SMTP_DEFAULT_FROM", "")
+
 # --- CORS ---------------------------------------------------------------
 CORS_ALLOWED_ORIGINS = _env_list(
     "CORS_ALLOWED_ORIGINS",

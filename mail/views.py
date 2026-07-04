@@ -16,7 +16,9 @@ from rest_framework import generics
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import search, services
+from django.conf import settings
+
+from . import search, sender, services
 from .models import StoredEmail
 from .serializers import (
     EmailDetailSerializer,
@@ -108,6 +110,40 @@ class RawMessageView(_OwnerMixin, APIView):
         resp = HttpResponse(bytes(msg.raw_email), content_type="message/rfc822")
         resp["Content-Disposition"] = f'attachment; filename="{pk}.eml"'
         return resp
+
+
+class SendView(_OwnerMixin, APIView):
+    """Compose + send. Body: {to, cc?, bcc?, subject, text_body, html_body?,
+    in_reply_to?, references?}. Addresses are strings or {name,email}."""
+
+    def post(self, request):
+        d = request.data
+        to = d.get("to") or []
+        if not to:
+            return Response({"detail": "At least one recipient is required."}, status=400)
+        from_email = getattr(request.user, "email", "") or settings.SMTP_DEFAULT_FROM
+        obj, delivered, error = sender.send_message(
+            self.owner(),
+            from_email=from_email,
+            from_name=d.get("from_name", ""),
+            to=to,
+            cc=d.get("cc"),
+            bcc=d.get("bcc"),
+            subject=d.get("subject", ""),
+            text_body=d.get("text_body", ""),
+            html_body=d.get("html_body", ""),
+            in_reply_to=d.get("in_reply_to", ""),
+            references=d.get("references", ""),
+        )
+        return Response(
+            {
+                "message": EmailDetailSerializer(obj).data,
+                "delivered": delivered,
+                "error": error,
+                "relay_configured": bool(settings.SMTP_HOST),
+            },
+            status=201,
+        )
 
 
 class StatsView(_OwnerMixin, APIView):
