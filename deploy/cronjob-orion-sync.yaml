@@ -1,0 +1,33 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mercury-orion-sync
+  namespace: live
+  labels:
+    app: mercury-orion-sync
+    app.kubernetes.io/part-of: live
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 600
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app: mercury-orion-sync
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: sync
+              image: harbor.georgievski.net/live/mercury:0.3.0
+              command: ["python", "manage.py", "sync_orion"]
+              envFrom:
+                - configMapRef:
+                    name: mercury-config
+                - secretRef:
+                    name: mercury-secrets

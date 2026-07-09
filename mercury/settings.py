@@ -103,6 +103,10 @@ SMTP_DEFAULT_FROM = os.getenv("SMTP_DEFAULT_FROM", "")
 # derived from DJANGO_SECRET_KEY when unset).
 MAIL_ENCRYPTION_KEY = os.getenv("MAIL_ENCRYPTION_KEY", "")
 
+# orion RAG connector — push stored mail into the assistant corpus.
+ORION_INGEST_URL = os.getenv("ORION_INGEST_URL", "")
+ORION_SERVICE_KEY = os.getenv("ORION_SERVICE_KEY", "")
+
 # --- CORS ---------------------------------------------------------------
 CORS_ALLOWED_ORIGINS = _env_list(
     "CORS_ALLOWED_ORIGINS",
