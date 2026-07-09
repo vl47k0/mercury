@@ -157,3 +157,74 @@ class StoredEmail(models.Model):
             if isinstance(first, dict):
                 return first.get("email", "")
         return ""
+
+
+class MailAccount(models.Model):
+    """A user's external mailbox connection (IMAP in, SMTP out).
+
+    One per owner. The password is stored Fernet-encrypted (`password_enc`) and
+    never returned by the API. `last_uid` tracks the highest fetched IMAP UID per
+    folder for incremental polling.
+    """
+
+    SSL = "ssl"
+    STARTTLS = "starttls"
+    NONE = "none"
+    SECURITY = [(SSL, "SSL/TLS"), (STARTTLS, "STARTTLS"), (NONE, "None")]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.CharField(max_length=128, unique=True, db_index=True)  # phoebe sub
+
+    email = models.EmailField()
+    display_name = models.CharField(max_length=255, blank=True, default="")
+
+    # Inbound (IMAP)
+    imap_host = models.CharField(max_length=255)
+    imap_port = models.IntegerField(default=993)
+    imap_ssl = models.BooleanField(default=True)
+
+    # Outbound (SMTP)
+    smtp_host = models.CharField(max_length=255)
+    smtp_port = models.IntegerField(default=465)
+    smtp_security = models.CharField(max_length=16, choices=SECURITY, default=SSL)
+
+    # Login (username defaults to the email address when blank)
+    username = models.CharField(max_length=255, blank=True, default="")
+    password_enc = models.TextField(blank=True, default="")
+
+    enabled = models.BooleanField(default=True)
+    folders = models.JSONField(default=list, blank=True)  # [] → ["INBOX"]
+    last_uid = models.JSONField(default=dict, blank=True)  # {folder: highest_uid}
+    last_synced_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "mail_account"
+
+    def __str__(self):
+        return f"MailAccount({self.owner}:{self.email})"
+
+    @property
+    def login(self) -> str:
+        return self.username or self.email
+
+    @property
+    def poll_folders(self) -> list[str]:
+        return self.folders or ["INBOX"]
+
+    def set_password(self, raw: str) -> None:
+        from . import crypto
+
+        self.password_enc = crypto.encrypt(raw)
+
+    def get_password(self) -> str:
+        from . import crypto
+
+        return crypto.decrypt(self.password_enc)
+
+    @property
+    def has_password(self) -> bool:
+        return bool(self.password_enc)

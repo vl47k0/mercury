@@ -18,12 +18,14 @@ from rest_framework.views import APIView
 
 from django.conf import settings
 
-from . import search, sender, services
-from .models import StoredEmail
+from . import imap_client, search, sender, services
+from .models import MailAccount, StoredEmail
 from .serializers import (
     EmailDetailSerializer,
     EmailListSerializer,
     EmailUpdateSerializer,
+    MailAccountSerializer,
+    MailAccountWriteSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -121,11 +123,16 @@ class SendView(_OwnerMixin, APIView):
         to = d.get("to") or []
         if not to:
             return Response({"detail": "At least one recipient is required."}, status=400)
-        from_email = getattr(request.user, "email", "") or settings.SMTP_DEFAULT_FROM
+        account = MailAccount.objects.filter(owner=self.owner()).first()
+        from_email = (
+            (account.email if account else getattr(request.user, "email", ""))
+            or settings.SMTP_DEFAULT_FROM
+        )
+        from_name = d.get("from_name") or (account.display_name if account else "")
         obj, delivered, error = sender.send_message(
             self.owner(),
             from_email=from_email,
-            from_name=d.get("from_name", ""),
+            from_name=from_name,
             to=to,
             cc=d.get("cc"),
             bcc=d.get("bcc"),
@@ -134,13 +141,14 @@ class SendView(_OwnerMixin, APIView):
             html_body=d.get("html_body", ""),
             in_reply_to=d.get("in_reply_to", ""),
             references=d.get("references", ""),
+            account=account,
         )
         return Response(
             {
                 "message": EmailDetailSerializer(obj).data,
                 "delivered": delivered,
                 "error": error,
-                "relay_configured": bool(settings.SMTP_HOST),
+                "relay_configured": bool((account and account.smtp_host) or settings.SMTP_HOST),
             },
             status=201,
         )
@@ -157,3 +165,56 @@ class StatsView(_OwnerMixin, APIView):
                 "with_attachments": qs.filter(has_attachments=True).count(),
             }
         )
+
+
+class MailAccountView(_OwnerMixin, APIView):
+    """The authenticated user's mailbox connection (one per owner)."""
+
+    def get(self, request):
+        account = MailAccount.objects.filter(owner=self.owner()).first()
+        if not account:
+            return Response({"configured": False})
+        return Response({"configured": True, **MailAccountSerializer(account).data})
+
+    def put(self, request):
+        account = MailAccount.objects.filter(owner=self.owner()).first()
+        s = MailAccountWriteSerializer(account, data=request.data, partial=bool(account))
+        s.is_valid(raise_exception=True)
+        password = s.validated_data.pop("password", None)
+        if account:
+            for k, v in s.validated_data.items():
+                setattr(account, k, v)
+        else:
+            account = MailAccount(owner=self.owner(), **s.validated_data)
+        if password:
+            account.set_password(password)
+        account.save()
+        return Response(MailAccountSerializer(account).data, status=200)
+
+    def delete(self, request):
+        MailAccount.objects.filter(owner=self.owner()).delete()
+        return Response(status=204)
+
+
+class MailAccountTestView(_OwnerMixin, APIView):
+    """Test IMAP + SMTP connectivity for the saved account."""
+
+    def post(self, request):
+        account = MailAccount.objects.filter(owner=self.owner()).first()
+        if not account:
+            return Response({"detail": "No mail account configured."}, status=400)
+        return Response(
+            {"imap": imap_client.test_imap(account), "smtp": sender.test_smtp(account)}
+        )
+
+
+class MailSyncView(_OwnerMixin, APIView):
+    """Trigger an immediate inbound IMAP fetch for the authenticated user."""
+
+    def post(self, request):
+        account = MailAccount.objects.filter(owner=self.owner()).first()
+        if not account:
+            return Response({"detail": "No mail account configured."}, status=400)
+        if not account.enabled:
+            return Response({"detail": "Account is disabled."}, status=400)
+        return Response(imap_client.fetch_new(account))

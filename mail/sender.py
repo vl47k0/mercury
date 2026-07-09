@@ -24,6 +24,54 @@ def _emails(addrs) -> list[str]:
     return [e for e in out if e]
 
 
+def _smtp_config(account):
+    """Return an SMTP dict from the user's account, else the global relay, else None."""
+    if account is not None and account.smtp_host:
+        return {
+            "host": account.smtp_host,
+            "port": account.smtp_port,
+            "security": account.smtp_security,
+            "user": account.login,
+            "password": account.get_password(),
+        }
+    if settings.SMTP_HOST:
+        security = "ssl" if settings.SMTP_SSL else ("starttls" if settings.SMTP_TLS else "none")
+        return {
+            "host": settings.SMTP_HOST,
+            "port": settings.SMTP_PORT,
+            "security": security,
+            "user": settings.SMTP_USER,
+            "password": settings.SMTP_PASSWORD,
+        }
+    return None
+
+
+def _connect_smtp(cfg):
+    if cfg["security"] == "ssl":
+        srv = smtplib.SMTP_SSL(cfg["host"], cfg["port"], timeout=30)
+    else:
+        srv = smtplib.SMTP(cfg["host"], cfg["port"], timeout=30)
+        if cfg["security"] == "starttls":
+            srv.starttls()
+    if cfg["user"]:
+        srv.login(cfg["user"], cfg["password"])
+    return srv
+
+
+def test_smtp(account) -> dict:
+    """Verify SMTP connect + auth without sending."""
+    cfg = _smtp_config(account)
+    if not cfg:
+        return {"ok": False, "error": "No SMTP host configured."}
+    try:
+        srv = _connect_smtp(cfg)
+        srv.noop()
+        srv.quit()
+        return {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)[:300]}
+
+
 def _fmt(addrs) -> str:
     parts = []
     for a in addrs or []:
@@ -47,6 +95,7 @@ def send_message(
     html_body: str = "",
     in_reply_to: str = "",
     references: str = "",
+    account=None,
 ):
     domain = from_email.split("@")[-1] if "@" in from_email else "mercury.local"
     msg = EmailMessage()
@@ -71,20 +120,14 @@ def send_message(
     raw_for_store = msg.as_bytes()
     recipients = _emails(to) + _emails(cc) + _emails(bcc)
 
+    cfg = _smtp_config(account)
     delivered, error = False, ""
-    if settings.SMTP_HOST and recipients:
+    if cfg and recipients:
         # Don't leak Bcc on the wire (the stored copy above still has it).
         if msg["Bcc"]:
             del msg["Bcc"]
         try:
-            if settings.SMTP_SSL:
-                srv = smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT, timeout=30)
-            else:
-                srv = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=30)
-                if settings.SMTP_TLS:
-                    srv.starttls()
-            if settings.SMTP_USER:
-                srv.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            srv = _connect_smtp(cfg)
             srv.send_message(msg, from_addr=from_email, to_addrs=recipients)
             srv.quit()
             delivered = True
@@ -98,7 +141,7 @@ def send_message(
         **(obj.metadata or {}),
         "delivered": delivered,
         "delivery_error": error,
-        "relay_configured": bool(settings.SMTP_HOST),
+        "relay_configured": bool(cfg),
     }
     obj.save(update_fields=["is_read", "metadata"])
     return obj, delivered, error

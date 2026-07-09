@@ -99,6 +99,10 @@ SMTP_TLS = _env_bool("SMTP_TLS", True)
 SMTP_SSL = _env_bool("SMTP_SSL", False)
 SMTP_DEFAULT_FROM = os.getenv("SMTP_DEFAULT_FROM", "")
 
+# Fernet key for encrypting stored mail-account passwords (falls back to a key
+# derived from DJANGO_SECRET_KEY when unset).
+MAIL_ENCRYPTION_KEY = os.getenv("MAIL_ENCRYPTION_KEY", "")
+
 # --- CORS ---------------------------------------------------------------
 CORS_ALLOWED_ORIGINS = _env_list(
     "CORS_ALLOWED_ORIGINS",
