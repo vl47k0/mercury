@@ -1,0 +1,33 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mercury-poll
+  namespace: live
+  labels:
+    app: mercury-poll
+    app.kubernetes.io/part-of: live
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 240
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app: mercury-poll
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: poll
+              image: harbor.georgievski.net/live/mercury:0.2.0
+              command: ["python", "manage.py", "poll_mail"]
+              envFrom:
+                - configMapRef:
+                    name: mercury-config
+                - secretRef:
+                    name: mercury-secrets
