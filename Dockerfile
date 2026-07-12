@@ -1,33 +1,30 @@
-FROM python:3-alpine AS base
+# --- build stage: compile deps into a venv (toolchain discarded) ---
+FROM python:3-alpine AS builder
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+RUN apk add --no-cache gcc g++ make musl-dev postgresql-dev
+COPY requirements.txt /tmp/requirements.txt
+RUN python -m venv /venv \
+ && /venv/bin/pip install --no-cache-dir --upgrade pip \
+ && /venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
+# --- runtime stage ---
+FROM python:3-alpine AS runtime
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/venv/bin:$PATH"
 RUN apk upgrade --no-cache && apk add --no-cache libpq libstdc++ bash
-
-WORKDIR /app
-
-COPY requirements.txt /app/
-RUN apk add --no-cache --virtual .build-deps gcc g++ make musl-dev postgresql-dev \
- && pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir -r requirements.txt \
- && apk del .build-deps
-
-FROM base AS runtime
-
 RUN addgroup -g 1001 beta && adduser -u 1001 -G beta -s /bin/sh -D beta
-
+COPY --from=builder /venv /venv
+RUN rm -rf /usr/local/lib/python3.*/site-packages/pip \
+           /usr/local/lib/python3.*/site-packages/pip-*.dist-info
+WORKDIR /app
 COPY --chown=beta:beta . /app/
-
 ARG VERSION=0.0.0
 RUN echo "$VERSION" > /app/VERSION
-
 RUN DJANGO_SECRET_KEY=build DJANGO_DEBUG=false python manage.py collectstatic --noinput \
  && chown -R beta:beta /app
-
 USER beta
-ENV PATH="/home/beta/.local/bin:${PATH}"
-
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
